@@ -1,7 +1,6 @@
 #include "recorder.hpp"
 
 #include <Carbon/Carbon.h>
-#include <CoreServices/CoreServices.h>
 
 #include <cassert>
 #include <chrono>
@@ -24,67 +23,15 @@ Recorder::Recorder(const std::string& out_path) : ostrm_(out_path, std::ios::bin
 }
 
 void Recorder::Handle(CGEventType type, CGEventRef event) {
-  CGEventTimestamp timestamp = CGEventGetTimestamp(event);
-
-  // The keycode returned is a virtual keycode. This code corresponds to which
-  // key was pressed on the keyboard, not which character that key produces.
-  // For example, on US keyboards, the key labeled 'B' will produce a virtual
-  // keycode of 11 (kVK_ANSI_B) no matter if the input source is set to Qwerty,
-  // Dvorak, etc...
-  int64_t value = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
-  assert(value >= 0 && value < 65536);
-  // Apple's documentation for UCKeyTranslate (used below) states "For ADB
-  // keyboards, virtual key codes are in the range from 0 to 127". However, the
-  // function accepts a 16-bit unsigned integer. I haven't been able to verify
-  // a virtual keycode can be larger than 8-bits, but I can imagine a keyboard
-  // with more than 256 keys that would require a larger storage type here.
-  // Making this 16-bit to be safe.
-  uint16_t virtual_keycode = static_cast<uint16_t>(value);
-
-  // Translate the virtual keycode plus any dead keys and modifiers into the
-  // Unicode character the user meant to type. This facilitates recording the
-  // count of Unicode characters the user is typing, but removes the ability to
-  // record the count of physical keyboard keys pressed.
-  // TODO: Create an option to allow the user to select whether they want to
-  // record physical keyboard keys pressed or characters produced. For example,
-  // with the current recording methodology, pressing the 'B' key on QWERTY,
-  // switching to a Dvorak input source, and pressing the 'N' key on your
-  // keyboard will result in two 'B' characters being recorded, even though two
-  // different physical keys were pressed.
-  uint16_t unicode_keycode = KeycodeToUnicode(virtual_keycode, event);
-
-  ostrm_.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
-  ostrm_.write(reinterpret_cast<const char*>(&unicode_keycode), sizeof(unicode_keycode));
-}
-
-uint16_t Recorder::KeycodeToUnicode(uint16_t virtual_keycode, CGEventRef event) {
-  // First, get the current input source. Each input source has a set of
-  // mappings of virtual keycodes to Unicode symbol(s). An input source has
-  // multiple mappings to allow different output based on which modifier key is
-  // currently held down. These mappings are contained in a format called
-  // 'uchr'. A UCKeyboardLayout pointer refers to the header of the 'uchr'
-  // resource and contains information on how to read the mappings contained
-  // within.
-  TISInputSourceRef input_source = TISCopyCurrentKeyboardLayoutInputSource();
-  CFDataRef input_source_property = static_cast<CFDataRef>(TISGetInputSourceProperty(input_source, kTISPropertyUnicodeKeyLayoutData));
-  const UCKeyboardLayout* keyboard_layout = reinterpret_cast<const UCKeyboardLayout*>(CFDataGetBytePtr((CFDataRef) input_source_property));
-
-  int64_t keyboard_type = CGEventGetIntegerValueField(event, kCGKeyboardEventKeyboardType);
-
-  // Record any modifier keys that are being held down. Modifier keys may
-  // change the character produced when pressing a key.
-  uint32_t modifiers = 0;
-  CGEventFlags flags = CGEventGetFlags(event);
-  if (flags & kCGEventFlagMaskAlphaShift) modifiers |= alphaLock;  // caps lock
-  if (flags & kCGEventFlagMaskShift) modifiers |= shiftKey;
-  if (flags & kCGEventFlagMaskControl) modifiers |= controlKey;
-  if (flags & kCGEventFlagMaskAlternate) modifiers |= optionKey;
-  if (flags & kCGEventFlagMaskCommand) modifiers |= cmdKey;
-
-  // A dead key is a modifier key used to change the output symbol of the
-  // subsequently pressed key. It differs from regular modifiers in that it
-  // doesn't have to be held down while the next key is pressed.
-  uint32_t dead_keys = 0;
+  // CGEventGetTimestamp(event) can be used to get the timestamp of the event
+  // in nanoseconds since startup, but it's easier to just use the system clock
+  // to get a normalized timestamp (microseconds since epoch) at the point in
+  // time when the event is handled. Exact nanosecond precision isn't really
+  // all that important here, as long as the time is relatively accurate. On my
+  // computer, std::chrono::system_clock provides microsecond precision, and
+  // std::chrono::high_resolution_clock provides nanosecond precision.
+  int64_t timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count();
 
   UniCharCount max_string_length = 1;
   UniCharCount actual_string_length;
@@ -97,25 +44,64 @@ uint16_t Recorder::KeycodeToUnicode(uint16_t virtual_keycode, CGEventRef event) 
   // encoding compact, I've decided to limit the Unicode characters recognized
   // here to those in the range [0, 2^16 - 1].
   UniChar unicode_string[max_string_length];
+  // Computers print characters on the screen by mapping physical key presses
+  // to Unicode output symbols. Different keyboard layouts (input sources)
+  // allow the same physical key on a keyboard to produce different symbols on
+  // the screen. Physical key to Unicode output symbol mappings are stored in
+  // the a format called 'uchr'. This function takes a keyboard event, which
+  // contains things like modifier key state, and uses the current input source
+  // to translate the physical key press into a Unicode output character.
+  CGEventKeyboardGetUnicodeString(event, max_string_length, &actual_string_length, unicode_string);
+  uint16_t unicode_keycode = unicode_string[0];
 
-  // Finally, convert the virtual keycode, modifier key state, and dead-key
-  // state into a Unicode string using the 'uchr' mapping for the current input
-  // source.
-  OSStatus result = UCKeyTranslate(
-      keyboard_layout,
-      virtual_keycode,
-      kUCKeyActionDown,
-      (modifiers >> 8) & 0xff,
-      keyboard_type,
-      kUCKeyTranslateNoDeadKeysMask,
-      &dead_keys,
-      max_string_length,
-      &actual_string_length,
-      unicode_string);
+  /*
+   * BEGIN UNUSED SECTION
+   *
+   * The code in the following section fetches a virtual keycode instead of the
+   * underlying Unicode character produced when pressing a key. A virtual
+   * keycode is a number representing a physical key on the keyboard. For
+   * example, when using the QWERTY input source, pressing the 'B' key will
+   * produce a Unicode 'B' character and the virtual keycode 11 (on ANSI
+   * keyboards at least, equal to the constant kVK_ANSI_B). Switching to Dvorak
+   * and pressing the physical 'B' key on the keyboard will produce a Unicode
+   * 'X' character, but the virtual keycode produced will still be 11.
+   * Depending on the goal of the user, either behavior might be desired. For
+   * now, this code will remain unused, but in the future I plan to add an
+   * option to allow either methodology for recording keystrokes (TODO).
+   */
 
-  // TODO: Handle `result` non-zero return codes.
+  // The keycode returned is a virtual keycode. This code corresponds to which
+  // key was pressed on the keyboard, not which character that key produces.
+  // For example, on US keyboards, the key labeled 'B' will produce a virtual
+  // keycode of 11 (kVK_ANSI_B) no matter if the input source is set to Qwerty,
+  // Dvorak, etc...
+  // int64_t value = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+  // assert(value >= 0 && value < 65536);
+  // Apple's documentation for UCKeyTranslate states "For ADB keyboards,
+  // virtual key codes are in the range from 0 to 127". However, the function
+  // accepts a 16-bit unsigned integer. I haven't been able to verify a virtual
+  // keycode can be larger than 8-bits, but I can imagine a keyboard with more
+  // than 256 keys that would require a larger storage type here.  Making this
+  // 16-bit to be safe.
+  // uint16_t virtual_keycode = static_cast<uint16_t>(value);
 
-  CFRelease(input_source);
+  /*
+   * END UNUSED SECTION
+   */
 
-  return unicode_string[0];
+  //
+  // Serialization format (v1):
+  // +--------------------+ +---------------------+ +---------+
+  // |       version      | |      timestamp      | | keycode | . . .
+  // +--------------------+ +---------------------+ +---------+
+  //         64 bits                64 bits           16 bits
+  //
+  // version: 64-bit unsigned integer representing the serialization version
+  // timestamp: 64-bit signed integer, microseconds since epoch
+  // keycode: 16-bit unsigned integer, Unicode encoding of typed character
+  //
+  // Timestamp, keycode pairs repeat.
+  //
+  ostrm_.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
+  ostrm_.write(reinterpret_cast<const char*>(&unicode_keycode), sizeof(unicode_keycode));
 }
