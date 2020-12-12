@@ -1,9 +1,27 @@
-all: keylogger reporter
+CXX = clang++
+CXXFLAGS = -Wall -g -std=c++17
 
-keylogger:
-	mkdir -p bin
-	clang++ -Wall -std=c++17 -g src/keylogger/keylogger.cpp src/keylogger/recorder.cpp src/keylogger/main.cpp -o bin/keylogger -framework ApplicationServices
+SRCDIR = src
+BUILDDIR = build
+BINDIR = bin
 
-reporter:
-	mkdir -p bin
-	clang++ -Wall -std=c++17 -g src/reporter/reporter.cpp src/reporter/main.cpp -o bin/reporter
+all: $(BINDIR)/keylogger $(BINDIR)/reporter
+
+$(BINDIR)/keylogger: $(BUILDDIR)/keylogger/keylogger.o $(BUILDDIR)/keylogger/recorder.o $(BUILDDIR)/keylogger/main.o | $(BINDIR)
+	$(CXX) $^ -o $@ -framework ApplicationServices
+
+$(BUILDDIR)/keylogger/%.o: $(SRCDIR)/keylogger/%.cpp | $(BUILDDIR)/keylogger
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+$(BINDIR)/reporter: $(BUILDDIR)/reporter/reporter.o $(BUILDDIR)/reporter/main.o | $(BINDIR)
+	$(CXX) $^ -o $@
+
+$(BUILDDIR)/reporter/%.o: $(SRCDIR)/reporter/%.cpp | $(BUILDDIR)/reporter
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+$(BUILDDIR)/keylogger $(BUILDDIR)/reporter $(BINDIR):
+	mkdir -p $@
+
+.PHONY: clean
+clean:
+	rm -rf $(BUILDDIR) $(BINDIR)
