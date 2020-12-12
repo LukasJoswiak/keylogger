@@ -1,0 +1,5 @@
+# Intermediate representations
+build/
+
+# Executables
+bin/
