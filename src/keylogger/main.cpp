@@ -2,7 +2,6 @@
 #include <iostream>
 
 #include "keylogger.hpp"
-#include "reporter.hpp" // TODO: Move to Keylogger
 
 void signal_handler(int signum) {
   // This is a temporary workaround to end the run loop and allow the
