@@ -7,7 +7,7 @@ BINDIR = bin
 
 all: $(BINDIR)/keylogger $(BINDIR)/reporter
 
-$(BINDIR)/keylogger: $(BUILDDIR)/keylogger/keylogger.o $(BUILDDIR)/keylogger/recorder.o $(BUILDDIR)/keylogger/main.o | $(BINDIR)
+$(BINDIR)/keylogger: $(BUILDDIR)/keylogger/keylogger.o $(BUILDDIR)/keylogger/recorder.o $(BUILDDIR)/utilities/cli.o $(BUILDDIR)/keylogger/main.o | $(BINDIR)
 	$(CXX) $^ -o $@ -framework ApplicationServices
 
 $(BUILDDIR)/keylogger/%.o: $(SRCDIR)/keylogger/%.cpp | $(BUILDDIR)/keylogger

