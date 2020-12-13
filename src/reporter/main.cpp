@@ -15,7 +15,9 @@ int main(int argc, char** argv) {
       std::cout << end->time_since_epoch().count() << std::endl;
     }
 
-    Reporter r(argv[1]);
+    auto input = p.parse_string("--input");
+
+    Reporter r(input.value());
 
     auto counts = r.GetCounts();
     for (const auto& [key, value] : counts) {
