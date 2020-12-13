@@ -13,13 +13,16 @@ $(BINDIR)/keylogger: $(BUILDDIR)/keylogger/keylogger.o $(BUILDDIR)/keylogger/rec
 $(BUILDDIR)/keylogger/%.o: $(SRCDIR)/keylogger/%.cpp | $(BUILDDIR)/keylogger
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-$(BINDIR)/reporter: $(BUILDDIR)/reporter/reporter.o $(BUILDDIR)/reporter/main.o | $(BINDIR)
+$(BINDIR)/reporter: $(BUILDDIR)/reporter/reporter.o $(BUILDDIR)/utilities/cli.o $(BUILDDIR)/reporter/main.o | $(BINDIR)
 	$(CXX) $^ -o $@
 
 $(BUILDDIR)/reporter/%.o: $(SRCDIR)/reporter/%.cpp | $(BUILDDIR)/reporter
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-$(BUILDDIR)/keylogger $(BUILDDIR)/reporter $(BINDIR):
+$(BUILDDIR)/utilities/%.o: $(SRCDIR)/utilities/%.cpp | $(BUILDDIR)/utilities
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+$(BUILDDIR)/keylogger $(BUILDDIR)/reporter $(BUILDDIR)/utilities $(BINDIR):
 	mkdir -p $@
 
 .PHONY: clean
