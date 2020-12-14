@@ -6,6 +6,10 @@
 
 ArgParser::ArgParser(char** begin, char** end) : begin_(begin), end_(end) {}
 
+bool ArgParser::exists(const std::string& option) {
+  return std::find(begin_, end_, option) != end_;
+}
+
 std::optional<std::string> ArgParser::parse_string(const std::string& option) {
   char** iterator = std::find(begin_, end_, option);
   if (iterator != end_ && ++iterator != end_) {

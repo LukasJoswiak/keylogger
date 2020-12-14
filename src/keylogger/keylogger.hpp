@@ -6,7 +6,7 @@
 
 class Keylogger {
  public:
-   Keylogger(const std::string& out_path);
+   Keylogger(const std::string& out_path, bool record_virtual = false);
 
   void Run();
   void Stop();

