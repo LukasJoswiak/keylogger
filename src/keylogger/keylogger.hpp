@@ -8,7 +8,7 @@
 
 class Keylogger {
  public:
-  Keylogger(const std::string& out_path, bool record_virtual = false);
+  Keylogger(const std::string& out_dir);
 
   void Run();
   void Stop();

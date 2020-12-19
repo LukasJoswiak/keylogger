@@ -1,49 +1,18 @@
 #include "recorder.hpp"
 
-#include <Carbon/Carbon.h>
-#include <IOKit/IOKitLib.h>
+#include <IOKit/hid/IOHIDDevice.h>
+#include <IOKit/hid/IOHIDElement.h>
+#include <IOKit/hid/IOHIDUsageTables.h>
 
 #include <cassert>
 #include <chrono>
 #include <iostream>
 
-Recorder::Recorder(const std::string& out_path, bool record_virtual) : ostrm_(out_path, std::ios::binary | std::ios::app), record_virtual_(record_virtual) {
-  uint16_t record_virtual_data = 0;
-  if (record_virtual) {
-    record_virtual_data = 1;
-  }
+Recorder::Recorder(const std::string& out_dir) : out_dir_(out_dir) {}
 
-  // If there is an existing data file, make sure its version matches the
-  // current write version. If the versions don't match, stop execution to
-  // avoid corrupting the file by writing data in an incompatible format.
-  if (ostrm_.tellp() > 0) {
-    std::ifstream istrm = std::ifstream(out_path, std::ios::binary | std::ios::in);
-    auto version = decltype(kWriteVersion){0};
-    istrm.read(reinterpret_cast<char*>(&version), sizeof(version));
-    if (version != kWriteVersion) {
-      throw std::runtime_error("output file has existing data encoded at a different version");
-    }
-
-    // Verify virtual flag in output file matches passed setting.
-    auto file_virtual = decltype(record_virtual_data){0};
-    istrm.read(reinterpret_cast<char*>(&file_virtual), sizeof(file_virtual));
-    if (file_virtual != record_virtual_data) {
-      throw std::runtime_error("output file has different virtual flag");
-    }
-
-    istrm.seekg(6, std::ios::cur);
-  } else {
-    // Write the version, in little-endian, to the new file.
-    ostrm_.write(reinterpret_cast<const char*>(&kWriteVersion), sizeof(kWriteVersion));
-
-    // Write the data type, in little-endian. This represents whether the
-    // recorded keystrokes are virtual or not.
-    ostrm_.write(reinterpret_cast<const char*>(&record_virtual_data), sizeof(uint16_t));
-
-    // Fill up remaining 48-bits with zero.
-    uint64_t zero = 0;
-    ostrm_.write(reinterpret_cast<const char*>(&zero), 6);
-  }
+void Recorder::HIDKeyboardCallback(void* context, IOReturn result, void* sender, IOHIDValueRef value) {
+  Recorder* r = static_cast<Recorder*>(context);
+  r->Handle(result, sender, value);
 }
 
 void Recorder::Handle(IOReturn result, void* sender, IOHIDValueRef value) {
@@ -64,8 +33,10 @@ void Recorder::Handle(IOReturn result, void* sender, IOHIDValueRef value) {
   // pressed. All scan codes are defined in the keyboard/keypad page (0x07) of
   // the USB HID specification. Note that the scan code is a representation of
   // the physical key pressed, not the character the computer will output on
-  // the screen.
-  uint32_t scancode = IOHIDElementGetUsage(element);
+  // the screen. The largest possible value returned should be 0xe7 as defined
+  // by the constraints set in keylogger.cpp with
+  // IOHIDManagerSetInputValueMatching.
+  uint8_t scancode = static_cast<uint8_t>(IOHIDElementGetUsage(element));
 
   // My impression is that for keyboards, this value will be 1 if the key has
   // been pressed, and 0 if the key has been released. I'll go based on this
@@ -97,11 +68,87 @@ void Recorder::Handle(IOReturn result, void* sender, IOHIDValueRef value) {
             << ", timestamp: " << timestamp
             << std::endl;
 
-  // TODO: Serialize information and save it to an output file named with the
-  // vendor and product IDs.
+  //
+  // Serialization format (v1):
+  //
+  // header:
+  // +-------------------+ +-------------------+
+  // |      version      | |     device ID     |
+  // +-------------------+ +-------------------+
+  //        64 bits               64 bits
+  //
+  // body (repeating):
+  // +-------------------+ +---------+
+  // |     timestamp     | | keycode | . . .
+  // +-------------------+ +---------+
+  //        64 bits           8 bits
+  //
+  // version: 64-bit unsigned integer representing the serialization version
+  // device ID: 64-bit unsigned integer representing a unique identifier for
+  //            the device. 32 higher order bits are the vendor ID, and the 32
+  //            lower order bits are the product ID of the HID device
+  //
+  // timestamp: 64-bit signed integer, microseconds since epoch, representing
+  //            the timestamp of the event
+  // scancode: 8-bit unsigned integer, usage ID of the pressed key according to
+  //           the USB HID 0x07 usage page
+  //
+  // Timestamp, keycode pairs repeat.
+  //
+  std::ofstream& ostrm = GetStream(vendor_id, product_id);
+  // TODO: Update this data to include `pressed`.
+  ostrm.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
+  ostrm.write(reinterpret_cast<const char*>(&scancode), sizeof(scancode));
 }
 
-void Recorder::HIDKeyboardCallback(void* context, IOReturn result, void* sender, IOHIDValueRef value) {
-  Recorder* r = static_cast<Recorder*>(context);
-  r->Handle(result, sender, value);
+std::ofstream& Recorder::GetStream(uint32_t vendor_id, uint32_t product_id) {
+  // Need a fast way to combine the vendor ID and product ID into a uniquely
+  // identifiable value. I guess the correct thing to do here would be to
+  // implement a pairing function. Instead, I'll just use a 64-bit unsigned
+  // integer where the higher 32 bits represent the vendor ID, and the lower 32
+  // bits represent the product ID. This value will be used to identify the
+  // input device.
+  uint64_t device_id = (static_cast<uint64_t>(vendor_id) << (8 * sizeof(product_id))) | product_id;
+
+  if (streams_.find(device_id) == streams_.end()) {
+    const std::string out_path = out_dir_ + "/" + std::to_string(device_id);
+
+    // Lazily instantiate output stream the first time it's needed.
+    streams_.emplace(device_id, std::ofstream(out_path, std::ios::binary | std::ios::app));
+    std::ofstream& ostrm = streams_[device_id];
+    if (ostrm.fail()) {
+      throw std::runtime_error("failed to open output file for writing");
+    }
+
+    if (ostrm.tellp() > 0) {
+      // If there is an existing data file, make sure its version matches the
+      // current write version. If the versions don't match, stop execution to
+      // avoid corrupting the file by writing data in an incompatible format.
+      std::ifstream istrm = std::ifstream(out_path, std::ios::binary | std::ios::in);
+      assert(istrm.good());
+      auto version = decltype(kWriteVersion){0};
+      istrm.read(reinterpret_cast<char*>(&version), sizeof(version));
+      if (version != kWriteVersion) {
+        throw std::runtime_error("output file has existing data encoded at a different version");
+      }
+
+      // Verify device ID in output file matches the current device ID.
+      uint64_t file_device_id;
+      istrm.read(reinterpret_cast<char*>(&file_device_id), sizeof(file_device_id));
+      if (file_device_id != device_id) {
+        throw std::runtime_error("output file name doesn't match internal metadata for device ID");
+      }
+    } else {
+      // If no output file exists for the device yet, write some initial
+      // metadata to the new file.
+
+      // Write the version, in little-endian, to the new file.
+      ostrm.write(reinterpret_cast<const char*>(&kWriteVersion), sizeof(kWriteVersion));
+
+      // Write the device ID, in little-endian.
+      ostrm.write(reinterpret_cast<const char*>(&device_id), sizeof(device_id));
+    }
+  }
+
+  return streams_[device_id];
 }
