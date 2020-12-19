@@ -2,20 +2,21 @@
 
 #include <ApplicationServices/ApplicationServices.h>
 
+#include <unordered_map>
+
 #include "recorder.hpp"
 
 class Keylogger {
  public:
-   Keylogger(const std::string& out_path, bool record_virtual = false);
+  Keylogger(const std::string& out_path, bool record_virtual = false);
 
   void Run();
   void Stop();
 
  private:
-  static CGEventRef tap_callback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void* user_info);
+  // Creates a CFMutableDictionary out of the given key-value pairs. Caller is
+  // responsible for freeing returned dictionary.
+  CFMutableDictionaryRef CreateMatchingCriteria(std::unordered_map<const char*, int> criteria);
 
   Recorder recorder_;
-
-  CFMachPortRef port_;
-  CFRunLoopSourceRef source_;
 };
