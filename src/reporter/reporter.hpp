@@ -21,4 +21,6 @@ class Reporter {
 
   std::ifstream istrm_;
   uint64_t version_;
+  uint32_t vendor_id_;
+  uint32_t product_id_;
 };
