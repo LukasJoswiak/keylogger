@@ -41,7 +41,7 @@ void Recorder::Handle(IOReturn result, void* sender, IOHIDValueRef value) {
   // My impression is that for keyboards, this value will be 1 if the key has
   // been pressed, and 0 if the key has been released. I'll go based on this
   // assumption for now.
-  long pressed = IOHIDValueGetIntegerValue(value);
+  bool pressed = IOHIDValueGetIntegerValue(value) > 0;
 
   // Read the vendor and product IDs of the device sending the HID report. It
   // is necessary to perform this step on every HID report received because it
@@ -61,7 +61,7 @@ void Recorder::Handle(IOReturn result, void* sender, IOHIDValueRef value) {
   }
 
   // Print some info out for now.
-  std::cout << "scancode: " << scancode
+  std::cout << "scancode: " << (uint16_t) scancode
             << ", pressed: " << pressed
             << ", vendor ID: " << vendor_id
             << ", product ID: " << product_id
@@ -78,10 +78,10 @@ void Recorder::Handle(IOReturn result, void* sender, IOHIDValueRef value) {
   //        64 bits               64 bits
   //
   // body (repeating):
-  // +-------------------+ +---------+
-  // |     timestamp     | | keycode | . . .
-  // +-------------------+ +---------+
-  //        64 bits           8 bits
+  // +-------------------+ +---------+ +-------+
+  // |     timestamp     | | keycode | | state | . . .
+  // +-------------------+ +---------+ +-------+
+  //        64 bits           8 bits     1 bit
   //
   // version: 64-bit unsigned integer representing the serialization version
   // device ID: 64-bit unsigned integer representing a unique identifier for
@@ -90,15 +90,16 @@ void Recorder::Handle(IOReturn result, void* sender, IOHIDValueRef value) {
   //
   // timestamp: 64-bit signed integer, microseconds since epoch, representing
   //            the timestamp of the event
-  // scancode: 8-bit unsigned integer, usage ID of the pressed key according to
-  //           the USB HID 0x07 usage page
-  //
-  // Timestamp, keycode pairs repeat.
+  // scancode: 8-bit unsigned integer, usage ID of the selected key according
+  //           to the USB HID 0x07 usage page
+  // state: 1-bit value representing whether the key has been pressed or
+  //        released. Will be set to 1 if the state of the key is pressed, and
+  //        0 if the state of the key is released
   //
   std::ofstream& ostrm = GetStream(vendor_id, product_id);
-  // TODO: Update this data to include `pressed`.
   ostrm.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
   ostrm.write(reinterpret_cast<const char*>(&scancode), sizeof(scancode));
+  ostrm.write(reinterpret_cast<const char*>(&pressed), sizeof(pressed));
 }
 
 std::ofstream& Recorder::GetStream(uint32_t vendor_id, uint32_t product_id) {
