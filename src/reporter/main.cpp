@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
 
     auto input = p.parse_string("--input");
 
-    Reporter r(input.value());
+    Reporter r(input.value(), begin, end);
 
     auto counts = r.GetCounts();
     for (const auto& [key, value] : counts) {

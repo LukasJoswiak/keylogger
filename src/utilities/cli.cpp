@@ -21,7 +21,8 @@ std::optional<std::string> ArgParser::parse_string(const std::string& option) {
 std::optional<std::chrono::time_point<std::chrono::system_clock, std::chrono::microseconds>> ArgParser::parse_date(const std::string& option) {
   auto string_date = parse_string(option);
   if (string_date) {
-    std::tm tm;
+    std::time_t t = std::time(nullptr);
+    std::tm tm = *std::localtime(&t);
     std::stringstream ss(string_date.value());
     ss >> std::get_time(&tm,  "%Y-%m-%dT%H:%M:%S");
     if (ss.fail()) {
