@@ -37,6 +37,12 @@ std::map<uint16_t, uint64_t> Reporter::GetCounts() {
       continue;
     }
 
+    std::chrono::microseconds ms(timestamp);
+    std::chrono::time_point<std::chrono::system_clock> tp(ms);
+    if (end_.has_value() && tp > end_.value()) {
+      break;
+    }
+
     if (counts.find(scancode) == counts.end()) {
       counts[scancode] = 0;
     }
